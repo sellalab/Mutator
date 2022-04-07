@@ -1,24 +1,26 @@
-# import necessary packages
 import numpy as np
 import pickle
 import argparse
 from copy import deepcopy
+import mutator_classes
 import os
 import sys
 from scipy.stats import loguniform
 
-import mutator_classes
-
-# this function checks that our assumptions are met
+# check that parameters make sense
 def check_basic_assumptions(args):
+
     assert args.N*args.h*args.s*2 > 10
-    print(f'2Nhs: parameter value {args.N*args.h*args.s*2} | expected value {20}')
-    print(f'Lhs: parameter value {args.loci*args.h*args.s} | expected value {3e9*0.08*20/(2*2e4)}')
     assert args.phi > 0
     assert args.mutation_rate > 0
-    print(f'2Nu_0: parameter value {args.N*args.mutation_rate*2} | expected value {2e4*1.25E-8*2}')
     assert args.mutator_mutation_rate > 0
+
+    print(f'N: parameter value {args.N} | expected value 1000 or 14000')
+    print(f'2Nhs: parameter value {args.N*args.h*args.s*2} | expected value {20}')
+    print(f'Lhs: parameter value {args.loci*args.h*args.s} | expected value {3e9*0.08*20/(2*2e4)}')
+    print(f'2Nu_0: parameter value {args.N*args.mutation_rate*2} | expected value {2e4*1.25E-8*2}')
     print(f'2N\mu: parameter value {args.N*args.mutator_mutation_rate*2} | expected value {2e4*1.25E-8*2}')
+
     f = 'Simulating a '
     if args.constant:
         f += 'constant size population '
@@ -33,9 +35,10 @@ def check_basic_assumptions(args):
     else:
         f += 'and mutators have a constant effect size'
     print(f)
+    print(args.which_population)
     sys.stdout.flush()
 
-# this function assigns default argument values and parses provided arguments
+# parse parameter values from arguments. Bools are passed as ints.
 def get_args():
     # a set of default params to use
 
@@ -149,8 +152,10 @@ def get_args():
     print(args)
     return args
 
+
 def main():
-    # get and check arguments
+
+    # get parameters
     args = get_args()
     check_basic_assumptions(args)
 
@@ -171,18 +176,17 @@ def main():
                                                     invariable_mutator_mutation_rate=args.invariable_mutator_mutation_rate,
                                                     outpath= os.path.join(args.outpath,'ancestral'),
                                                     initialize=True,
-                                                    variable_mutator_effect = args.variable_mutator_effect)
+                                                    variable_mutator_effect = args.variable_mutator_effect,
+                                                    somatic = True)
 
     print('initial population created')
-
     # If a split time is provided then
     if args.split_gen:
         print('Using a population split')
-
+        args.total_gen = int(7e4)
         # If pop size is not constant
         if not args.constant:
             print('with variable population sizes')
-
             # Find where population sizes are stored
             with open(args.NE_path, 'rb') as fin:
                 NE_times = pickle.load(fin)
@@ -198,12 +202,11 @@ def main():
             YRI_N_function = lambda t: args.N
 
 
-        # if final population for the ancestral population does not exist
+        # if final population for this population does not exist, then finish simulations for it
+        # For the ancestral population, we follow the CEU population sizes
         if not os.path.exists(os.path.join(ancestral_population.outpath,'final_population.pickle')):
-            # if this simulation is meant to run the ancestral population simulation, do that
             if args.which_population == 'ancestral':
                 # we simulate the ancestral population for TOTAL_GEN - SPLIT_GEN generations
-                # For the ancestral population, we follow the CEU population sizes
                 ancestral_population = simulate(parent_population=ancestral_population,
                                               start_gen=args.total_gen,
                                               stop_gen = args.split_gen,
@@ -211,22 +214,17 @@ def main():
                                               backup_gen=args.backup_gen)
                 print('Finished ancestral population')
                 quit()
-            # otherwise quit, because you can't run the split populations until the ancestral one is done
             else:
                 print("Can't run job as ancestral population is not finished")
                 quit()
-        # if it does exist
         else:
-            # the ancestral population simulation is finished
             if args.which_population == 'ancestral':
                 print('Ancestral population finished already')
                 quit()
-            # we can load the final population to use for the first generation of the split populations
             else:
                 with open(os.path.join(ancestral_population.outpath, 'final_population.pickle'),'rb') as fin:
                     ancestral_population = pickle.load(fin)
 
-        # determine which splut population we are running
         if args.which_population == 'YRI':
             # make a copy of the ancestral population and run the YRI branch
             YRI_population = deepcopy(ancestral_population)
@@ -278,18 +276,21 @@ def main():
     print('done')
 
 # determine what the current population size is when using a variable population size
-def get_variable_N(NE_times, index, t):
-    NE_keys = np.array(list(NE_times.keys()))
-    current_step = max(NE_keys[NE_keys < t])
-    N = NE_times[current_step][index]
+def get_variable_N(NE_times, index, t, burn_time = 5e4):
+    if t > 6e4:
+        N = 14000
+    else:
+        NE_keys = np.array(list(NE_times.keys()))
+        current_step = max(NE_keys[NE_keys < t])
+        N = NE_times[current_step][index]
     return int(N)
 
 # check if there is a current version of this simulation already started and restart from there.
 # otherwise, just start from begining
 def check_for_backups(parent_population, gen):
 
-    if os.path.exists(os.path.join(parent_population.outpath,'backup')):
-        with open(os.path.join(parent_population.outpath,'backup'), 'rb') as fin:
+    if os.path.exists(os.path.join(parent_population.outpath,'backup.pickle')):
+        with open(os.path.join(parent_population.outpath,'backup.pickle'), 'rb') as fin:
             backup_population, backup_gen = pickle.load(fin)
         return backup_population, backup_gen
     else:
@@ -306,9 +307,15 @@ def simulate(parent_population, start_gen, stop_gen, N_function, backup_gen,post
     parent_population, gen = check_for_backups(parent_population=parent_population,
                                                gen=start_gen)
 
-    while gen > stop_gen:
+    print('starting at ',gen)
+    sys.stdout.flush()
 
-        # Determine next generation's population size
+    while gen > stop_gen:
+        if gen <= 100: 
+            backup_gen = 1
+        if gen <= 50:
+            break
+        #Determine next generation's population size
         N = N_function(gen)
 
         # make next generation population
@@ -328,10 +335,6 @@ def simulate(parent_population, start_gen, stop_gen, N_function, backup_gen,post
 
             print(f'Generation: {gen}, mean mutator freq: {np.mean(mutator_counts)}')
             sys.stdout.flush()
-            # selected_mutation_values = [ind.selected_mutations for ind in parent_population.people]
-            # print(np.mean(selected_mutation_values),2*parent_population.mutation_rate*parent_population.loci/(parent_population.s*parent_population.h))
-            # with open(os.path.join(parent_population.outpath,'selected_mutation_values.pickle'),'ab+') as fout:
-            #     pickle.dump(selected_mutation_values,fout)
 
             with open(os.path.join(parent_population.outpath,'backup.pickle'), 'wb+') as fout:
                 pickle.dump((parent_population, gen), fout)
@@ -342,7 +345,7 @@ def simulate(parent_population, start_gen, stop_gen, N_function, backup_gen,post
 
     return parent_population
 
-# this create the joblist for the simulations. It needs to be edited as you change parameters or other settings.
+# create joblist
 def create_joblist():
 
     simpleParams = False
@@ -350,21 +353,21 @@ def create_joblist():
     variableMutatorEffect = False
     variableSelectedEffect = False
 
-    default_params = {'N': 20000,  # population size
+    default_params = {'N': 14000,  # population size
                       'M': 1000,  # number of modifier loci, M
                       'h': 0.5,  # h
                       's': 0.001,  # s - together hs are the average fitness effects of mutations at selected loci
                       'phi': 0,  # effect size of mutator alleles
                       'mutator_mutation_rate': 1.25E-8,  # Mutation rate at modifier sites
                       'mutation_rate': 1.25E-8,  # baseline mutation rate at selected sites, u0
-                      'loci': 3E9 * 0.08,  # number of selected loci
+                      'loci': 3E9 * 0.08 / 32,  # number of selected loci
                       'constant': int(False),  # is the population size constant
                       'split_gen': 10000,
                       # the generation at which the ancestral population is split into europeans and africans
                       'backup_gen': 100,  # backup the population every 100 generations
                       'ignore_gen': 0,  # stop simulations this many generations from the present
                       'total_gen': 100000,  # how many total generations to simulate
-                      'outpath': '/home/ec2-user/Mutator/humanParams/',  # where do we store results
+                      'outpath': '/home/ec2-user/Mutator/somatic/',  # where do we store results
                       'NE_path': '/home/ec2-user/Mutator/' + 'MSMC_NE_dict.pickle',
                       # where do we get population size estimates
                       'invariable_mutator_mutation_rate': int(True),
@@ -411,7 +414,8 @@ def create_joblist():
             print(p['outpath'])
 
             if humanParams:
-                for population in ['ancestral','YRI','CEU']:
+                for population in ['ancestral','CEU','YRI']:
+                    p['which_population'] = population
                     jobstring = ''
                     for name,value in p.items():
                         jobstring += f'--{name}={value} '
@@ -430,4 +434,4 @@ def create_joblist():
 
 if __name__ == '__main__':
     main()
-    # create_joblist()
+    #create_joblist()

@@ -1,20 +1,20 @@
 import numpy as np
 from scipy.integrate import quad
+
+import mutator_classes
 from scipy import stats
 
-
 # calculates the  stationary distribution for mutator alleles
-def get_SD(p,sm=0,max_gen=1000,phi=None):
+def get_SD(p,max_gen=1000,phi=None,somatic=0):
 
-    # if phi is not provided, use the value contained within the parameters, p
     if not phi:
         phi = p.phi
 
-    # calculate s^* (the strong selection approximation)
-    cum_survival = expected_extra_mutations_somatic(p = p, max_gen = max_gen, sm = sm, phi = phi)
-    new_s = (1 - sum(cum_survival[1:])/sum(cum_survival[:-1]))
+    # calculate s*
+    cum_survival = expected_extra_mutations_somatic(p = p, max_gen = max_gen, somatic=somatic, phi = phi)
+    new_s = 1/sum(cum_survival)
 
-    # these keep track of the possibilty
+    # keep track of the probability of transitioning to 0 or 1
     zero_transition_prob = 0
     one_transition_prob  = 0
 
@@ -24,7 +24,7 @@ def get_SD(p,sm=0,max_gen=1000,phi=None):
     # iterate over possible discrete allele values between 1 and 2N-1
     for i in np.linspace(1, 2 * p.N - 1, 2 * p.N - 1):
 
-        # calculate the probability of moving to lost or fixed state
+        # calculate the probability of moving to lost or fixed state and the (not normalized) density at state i
         transition_prob_0, transition_prob_1, density_at_x = get_probability_of_transition(p = p,
                                                                                              x = i / (2 * p.N),
                                                                                              new_s = new_s)
@@ -45,7 +45,7 @@ def get_SD(p,sm=0,max_gen=1000,phi=None):
     nc = sd[0] + sd[1] + density_not_at_boundaries
     assert np.isclose(nc,sum(sd.values()))
 
-    # creates a discrete stationary distribution to sample from
+    # creates a normalized, discrete stationary distribution to sample from
     for i in sd.keys():
         sd[i] = sd[i] / nc
 
@@ -81,13 +81,14 @@ def freq_dep(x, p, new_s):
 
     return f
 
-def expected_extra_mutations_somatic(p, max_gen: int, phi, sm=0):
+# calculate K(t)
+def expected_extra_mutations_somatic(p, max_gen: int, phi, somatic=0):
     mutation_curve = [0]
     cum_survival = [1]
 
     for gen in np.arange(1, max_gen):
         mutation_curve.append(mutation_curve[gen - 1] * (1/2) + p.loci * phi)
-        exp_x = np.exp(-(mutation_curve[gen - 1])*p.h*p.s)*(1-sm)
+        exp_x = np.exp(-(mutation_curve[gen - 1])*p.h*p.s)*(1-somatic)
         cum_survival.append(cum_survival[-1] * exp_x)
 
     return cum_survival

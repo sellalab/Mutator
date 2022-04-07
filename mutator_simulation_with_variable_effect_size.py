@@ -4,6 +4,7 @@ import argparse
 from copy import deepcopy
 import mutator_classes_with_variable_effect_size as mutator_classes
 import os
+from scipy import stats
 from scipy.stats import loguniform
 import sys
 # import common_functions
@@ -316,7 +317,7 @@ def create_joblist():
 
     default_params = {'N': 20000,  # population size
                       'M': 1000,  # number of modifier loci, M
-                      'h': 0.5,  # h
+                      'h': 1,  # h
                       's': 0.001,  # s - together hs are the average fitness effects of mutations at selected loci
                       'phi': 0,  # effect size of mutator alleles
                       'mutator_mutation_rate': 1.25E-8,  # Mutation rate at modifier sites
@@ -327,7 +328,7 @@ def create_joblist():
                       # the generation at which the ancestral population is split into europeans and africans
                       'backup_gen': 100,  # backup the population every 100 generations
                       'ignore_gen': 0,  # stop simulations this many generations from the present
-                      'total_gen': 100000,  # how many total generations to simulate
+                      'total_gen': 50000,  # how many total generations to simulate
                       'outpath': '/home/ec2-user/Mutator/variableN/',  # where do we store results
                       'NE_path': '/home/ec2-user/Mutator/' + 'MSMC_NE_dict.pickle',
                       # where do we get population size estimates
@@ -355,8 +356,11 @@ def create_joblist():
     elif variableSelectedEffect:
         joblist_name = 'variableSelectedEffect_params'
         default_params['variable_selective_effect'] = int(True)
-        default_params['s'] = loguniform(20/(2*default_params['N']),20.1/(2*default_params['N'])).mean()
-        default_params['outpath'] = '/home/ec2-user/Mutator/variableSelectedEffect_constant/'
+        a = (10/15)**2
+        b = (10/(2000)/a)
+        gamma = stats.gamma(a = a,scale=b,loc=0.01)
+        default_params['s'] = loguniform(20/(2*default_params['N']),0.1).mean()#/(2*default_params['N'])).mean()
+        default_params['outpath'] = '/home/ec2-user/Mutator/variableSelectedEffect_LUreducedNE/'
     elif humanParams:
         joblist_name = 'human_params'
 
@@ -367,7 +371,7 @@ def create_joblist():
     calc_phi = lambda p, S: S/(4 * p['N'] * p['loci'] * p['h'] * p['s'])
 
     for S in np.logspace(-2, 3, 11):
-        for v_raw in range(10):
+        for v_raw in range(20):
             v = v_raw
             p = deepcopy(default_params)
             p['phi'] = calc_phi(p,S)
@@ -380,7 +384,7 @@ def create_joblist():
             jobstring += '\n'
             jobs.append(jobstring)
 
-    with open(os.path.join('.', f'{joblist_name}_joblist.txt'), 'w+') as fin:
+    with open(os.path.join('.', f'{joblist_name}_joblist_lu.txt'), 'w+') as fin:
         fin.writelines(jobs)
         
 if __name__ == '__main__':
