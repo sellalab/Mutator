@@ -5,7 +5,8 @@ import mutator_classes
 from scipy import stats
 
 # calculates the  stationary distribution for mutator alleles
-def get_SD(p,max_gen=1000,phi=None,somatic=0):
+# max_gen needs to be much greater than 1/s for strongly selected mutators
+def get_SD(p,max_gen=int(1e5),phi=None,somatic=0):
 
     if not phi:
         phi = p.phi
@@ -88,7 +89,7 @@ def expected_extra_mutations_somatic(p, max_gen: int, phi, somatic=0):
 
     for gen in np.arange(1, max_gen):
         mutation_curve.append(mutation_curve[gen - 1] * (1/2) + p.loci * phi)
-        exp_x = np.exp(-(mutation_curve[gen - 1])*p.h*p.s)*(1-somatic)
+        exp_x = np.exp(-(mutation_curve[gen])*p.h*p.s)*(1-somatic)
         cum_survival.append(cum_survival[-1] * exp_x)
 
     return cum_survival
